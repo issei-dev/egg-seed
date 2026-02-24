@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Dot Pet (No Images) - Tamagotchi-like</title>
+  <style>
+    :root{
+      --bg:#e9f5ee;
+      --panel:#ffffff;
+      --lcd:#d7f0d8;
+      --dot:#1f3d2b;
+      --frame:#2b2b2b;
+      --muted:#5b6b63;
+      --chip:#f1f6f3;
+      --chip-b:#d7e5dd;
+      --shadow:0 4px 16px rgba(0,0,0,.06);
+    }
+    body{
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background:var(--bg);
+      margin:0;
+      padding:24px;
+      color:#111;
+    }
+    .wrap{max-width: 980px; margin:0 auto; display:grid; gap:16px;}
+    .panel{
+      background:var(--panel);
+      border:1px solid #ddd;
+      border-radius:16px;
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+    .top{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;}
+    .lcd {
+      border: 10px solid var(--frame);
+      border-radius: 18px;
+      background: var(--lcd);
+      padding: 12px;
+      display:inline-block;
+    }
+    canvas{
+      width: 480px; height: 320px; /* 表示サイズ（拡大） */
+      background: transparent;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      display:block;
+    }
+    .hud{display:grid; gap:10px; min-width: 320px; flex:1;}
+    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
+    .pill{
+      background:var(--chip);
+      border:1px solid var(--chip-b);
+      padding:6px 10px;
+      border-radius:999px;
+      font-size:12px;
+    }
+    .bars{display:grid; gap:8px; margin-top:6px;}
+    .bar{display:grid; grid-template-columns: 92px 1fr 56px; gap:10px; align-items:center;}
+    .meter{height:10px; background:#cfe6d1; border-radius:8px; overflow:hidden; border:1px solid #b7d0ba;}
+    .fill{height:100%; background:var(--dot);}
+    .actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;}
+    button{
+      border:1px solid #ccc; background:#fff; padding:10px 12px; border-radius:12px;
+      cursor:pointer; font-weight:700;
+    }
+    button:disabled{opacity:.5; cursor:not-allowed;}
+    .small{font-size:12px; color:var(--muted); line-height:1.5;}
+    .log{
+      white-space:pre-wrap;
+      background:#0b1b12;
+      color:#c7f7da;
+      padding:12px;
+      border-radius:12px;
+      min-height:92px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px;
+    }
+    /* 図鑑パネル */
+    #dexPanel{display:none;}
+    #dexList{background:#11251a;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel top">
+      <div class="lcd">
+        <!-- 内部解像度（ゲーム画面） -->
+        <canvas id="screen" width="96" height="64" aria-label="Dot pet screen"></canvas>
+      </div>
+
+      <div class="hud">
+        <div class="row">
+          <div class="pill">Phase: <b id="phase">1</b></div>
+          <div class="pill">Form: <b id="form">egg</b></div>
+          <div class="pill">Actions left: <b id="left">3</b></div>
+        </div>
+
+        <div class="row">
+          <div class="pill">Legacy: <b id="legacy">0</b></div>
+          <div class="pill">Dex: <b id="dexCount">0</b></div>
+          <div class="pill">Mastery Σ: <b id="mSum">0</b></div>
+        </div>
+
+        <div class="bars">
+          <div class="bar">
+            <div>幸福度</div>
+            <div class="meter"><div id="barH" class="fill" style="width:30%"></div></div>
+            <div id="valH">30</div>
+          </div>
+          <div class="bar">
+            <div>運動量</div>
+            <div class="meter"><div id="barF" class="fill" style="width:20%"></div></div>
+            <div id="valF">20</div>
+          </div>
+          <div class="bar">
+            <div>好奇心</div>
+            <div class="meter"><div id="barC" class="fill" style="width:10%"></div></div>
+            <div id="valC">10</div>
+          </div>
+        </div>
+
+        <div class="row small">
+          Mastery（やり込み）: 幸 <b id="mH">0</b> / 運 <b id="mF">0</b> / 好 <b id="mC">0</b>
+        </div>
+
+        <div class="actions">
+          <button id="btnEat">食べる</button>
+          <button id="btnWalk">歩く</button>
+          <button id="btnPlay">遊ぶ</button>
+          <button id="btnSleep">寝る</button>
+          <button id="btnDex">図鑑</button>
+          <button id="btnGraduate">卒業する</button>
+          <button id="btnReset">リセット</button>
+        </div>
+
+        <div class="small">
+          ※ 1日3アクション。日付が変わると回数が復活します（localStorage保存）。<br/>
+          ※ Phase2: 6回 / Phase3: 12回（サクサク進化）
+        </div>
+      </div>
+    </div>
+
+    <!-- 図鑑 -->
+    <div id="dexPanel" class="panel">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <b>図鑑</b>
+        <button id="btnBackToPlay">戻る</button>
+      </div>
+
+      <div id="dexSummary" class="small" style="margin:8px 0 12px;"></div>
+
+      <div id="dexList" class="log"></div>
+
+      <div class="row" style="margin-top:12px; gap:10px;">
+        <button id="btnStartNewEgg">新しい卵を開始</button>
+        <span class="small">※卒業後にのみ開始できます</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <b>ログ</b>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+<script>
+/** =========================================================
+ *  Dot Pet - Single file version for GitHub Pages
+ *  No image assets; sprites are generated algorithmically.
+ *  ========================================================= */
+
+/** ---------- 0) Utils ---------- */
+const clamp = (n,min,max)=>Math.max(min, Math.min(max,n));
+const todayKey = ()=> new Date().toISOString().slice(0,10); // YYYY-MM-DD (UTC基準の簡易)
+
+function log(msg){
+  const el = document.getElementById("log");
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+}
+
+/** ---------- 1) Constants ---------- */
+const STORAGE_KEY = "dotpet_v2";
+const SCREEN_W = 96;
+const SCREEN_H = 64;
+const SPRITE = 32;
+
+/** ---------- 2) Canvas / Colors ---------- */
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const COLORS = {
+  bg: "#d7f0d8",
+  dot: "#1f3d2b",
+  faint: "#b9d9bf"
+};
+
+function clearLCD(){
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+
+  // 液晶っぽい薄いディザ格子
+  ctx.fillStyle = COLORS.faint;
+  for(let y=0;y<SCREEN_H;y+=2){
+    for(let x=0;x<SCREEN_W;x+=2){
+      if((x+y)%4===0) ctx.fillRect(x,y,1,1);
+    }
+  }
+}
+
+function drawSprite(spriteStrings, ox, oy, color=COLORS.dot){
+  ctx.fillStyle = color;
+  for(let y=0;y<spriteStrings.length;y++){
+    const row = spriteStrings[y];
+    for(let x=0;x<row.length;x++){
+      if(row[x]==="#") ctx.fillRect(ox+x, oy+y, 1, 1);
+    }
+  }
+}
+
+/** ---------- 3) State ---------- */
+const defaultState = {
+  // game
+  phase: 1,
+  lineage: "",     // "happy_line" | "fit_line" | "cur_line"
+  form: "egg",     // egg | happy_1..3 | fit_1..3 | cur_1..3
+  happiness: 30,
+  fitness: 20,
+  curiosity: 10,
+
+  actionsLeft: 3,
+  totalActions: 0,
+  lastDate: todayKey(),
+
+  lastAction: "",     // "eat"|"walk"|"play"|"sleep"
+  animMode: "idle",   // "idle"|"eat"|"walk"|"play"|"sleep"
+
+  // meta / progression
+  view: "play", // "play" | "dex"
+  mastery: { happy: 0, fit: 0, cur: 0 },  // Phase3以降で増える
+  dex: [],              // 卒業履歴（最新順）
+  legacy: 0,            // 継承ポイント
+  graduatedCount: 0,
+  pendingGraduation: null // {earned, base, bonus, entry}
+};
+
+function load(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return structuredClone(defaultState);
+    const s = JSON.parse(raw);
+    // デフォルトをベースにマージ
+    return {...structuredClone(defaultState), ...s};
+  }catch(e){
+    return structuredClone(defaultState);
+  }
+}
+function save(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+let state = load();
+// 互換補完（念のため）
+state.view ??= "play";
+state.mastery ??= { happy: 0, fit: 0, cur: 0 };
+state.dex ??= [];
+state.legacy ??= 0;
+state.graduatedCount ??= 0;
+state.pendingGraduation ??= null;
+
+/** ---------- 4) Daily reset ---------- */
+function dailyResetIfNeeded(){
+  const t = todayKey();
+  if(state.lastDate !== t){
+    state.lastDate = t;
+    state.actionsLeft = 3;
+    log("日付が変わりました。アクション回数をリセットしました（3回）。");
+    save();
+  }
+}
+
+/** ---------- 5) Evolution logic ---------- */
+function dominantStat(){
+  const h=state.happiness, f=state.fitness, c=state.curiosity;
+  if(h>=f && h>=c) return "happy";
+  if(f>=h && f>=c) return "fit";
+  return "cur";
+}
+function secondDominant(exclude){
+  const arr = [
+    {k:"happy", v:state.happiness},
+    {k:"fit",   v:state.fitness},
+    {k:"cur",   v:state.curiosity}
+  ].filter(x=>x.k!==exclude).sort((a,b)=>b.v-a.v);
+  return arr[0].k;
+}
+
+function evolveIfNeeded(){
+  // Phase1 -> Phase2 : totalActions >= 6
+  if(state.phase===1 && state.totalActions>=6){
+    const dom = dominantStat(); // happy/fit/cur
+    state.phase = 2;
+
+    if(dom==="happy"){ state.lineage="happy_line"; state.form="happy_1"; }
+    if(dom==="fit"){   state.lineage="fit_line";   state.form="fit_1"; }
+    if(dom==="cur"){   state.lineage="cur_line";   state.form="cur_1"; }
+
+    log(`第2フェーズへ進化！ 分岐=${dom} → ${state.form}`);
+  }
+
+  // Phase2 -> Phase3 : totalActions >= 12（サクサク進化）
+  if(state.phase===2 && state.totalActions>=12){
+    state.phase = 3;
+
+    // 2位ステでPhase3の枝を決める（各系統で3つ目は“純血”扱いにしてもOK）
+    if(state.lineage==="happy_line"){
+      const sub = secondDominant("happy"); // fit or cur
+      state.form = (sub==="fit") ? "happy_2" : "happy_3";
+    }
+    if(state.lineage==="fit_line"){
+      const sub = secondDominant("fit");   // happy or cur
+      state.form = (sub==="happy") ? "fit_2" : "fit_3";
+    }
+    if(state.lineage==="cur_line"){
+      const sub = secondDominant("cur");   // happy or fit
+      state.form = (sub==="happy") ? "cur_2" : "cur_3";
+    }
+
+    log(`第3フェーズへ進化！ → ${state.form}（Phase3以降はMasteryでやり込み）`);
+  }
+}
+
+/** ---------- 6) Mastery (Phase3+) ---------- */
+function addMasteryByAction(kind){
+  if(state.phase < 3) return;
+  const gain = 1; // 1日3回なので+1が心地いい
+  if(kind === "eat")  state.mastery.happy += gain;
+  if(kind === "walk") state.mastery.fit   += gain;
+  if(kind === "play") state.mastery.cur   += gain;
+  // sleepは加算なし（好み）
+}
+
+/** ---------- 7) Actions ---------- */
+function spendAction(kind){
+  dailyResetIfNeeded();
+  if(state.view === "dex"){
+    log("図鑑画面ではアクションできません。戻ってね。");
+    return;
+  }
+  if(state.actionsLeft <= 0){
+    log("本日のアクション回数を使い切りました。日付が変わるまで待ってね。");
+    return;
+  }
+
+  state.actionsLeft--;
+  state.totalActions++;
+  state.lastAction = kind;
+  state.animMode = kind;
+
+  // ステ上昇量（チューニングしやすい値）
+  if(kind==="eat"){  state.happiness = clamp(state.happiness + 12, 0, 100); }
+  if(kind==="walk"){ state.fitness   = clamp(state.fitness   + 12, 0, 100); }
+  if(kind==="play"){ state.curiosity = clamp(state.curiosity + 12, 0, 100); }
+  if(kind==="sleep"){
+    // 睡眠は微調整（全体+4） ※不要なら0でもOK
+    state.happiness = clamp(state.happiness + 4, 0, 100);
+    state.fitness   = clamp(state.fitness   + 4, 0, 100);
+    state.curiosity = clamp(state.curiosity + 4, 0, 100);
+  }
+
+  addMasteryByAction(kind);
+  evolveIfNeeded();
+
+  const label = {eat:"食べる", walk:"歩く", play:"遊ぶ", sleep:"寝る"}[kind] || kind;
+  log(`${label} を実行（残り ${state.actionsLeft}/3 / totalActions=${state.totalActions}）`);
+
+  save();
+  updateHUD();
+}
+
+/** ---------- 8) Graduation / Dex / Legacy ---------- */
+function toggleDexPanel(show){
+  const panel = document.getElementById("dexPanel");
+  panel.style.display = show ? "block" : "none";
+}
+
+function renderDexPanel(){
+  const summary = document.getElementById("dexSummary");
+  const list = document.getElementById("dexList");
+
+  const p = state.pendingGraduation;
+  const dexCount = state.dex.length;
+
+  if(p){
+    summary.textContent =
+      `卒業おめでとう！ Legacy +${p.earned}（基本${p.base} + やり込み${p.bonus}） / ` +
+      `累計Legacy: ${state.legacy} / 図鑑: ${dexCount}体`;
+  }else{
+    summary.textContent =
+      `累計Legacy: ${state.legacy} / 図鑑: ${dexCount}体`;
+  }
+
+  if(dexCount === 0){
+    list.textContent = "まだ卒業したキャラクターがいません。";
+    return;
+  }
+
+  const lines = state.dex.slice(0, 20).map((d, i) => {
+    const mSum = d.mastery.happy + d.mastery.fit + d.mastery.cur;
+    return [
+      `#${dexCount - i}  ${d.finishedAt}`,
+      ` form=${d.form}  lineage=${d.lineage}  phase=${d.phase}`,
+      ` stats(h/f/c)=${d.stats.h}/${d.stats.f}/${d.stats.c}`,
+      ` mastery(h/f/c)=${d.mastery.happy}/${d.mastery.fit}/${d.mastery.cur}  sum=${mSum}`,
+      `---`
+    ].join("\n");
+  });
+
+  list.textContent = lines.join("\n");
+}
+
+function graduateNow(){
+  if(state.view === "dex"){
+    log("すでに図鑑画面です。");
+    return;
+  }
+  if(state.phase < 3){
+    log("卒業は第3フェーズ到達後に可能です。");
+    return;
+  }
+
+  const entry = {
+    id: "pet_" + Date.now(),
+    form: state.form,
+    lineage: state.lineage,
+    phase: state.phase,
+    stats: { h: state.happiness, f: state.fitness, c: state.curiosity },
+    mastery: { ...state.mastery },
+    finishedAt: new Date().toISOString().slice(0,10),
+  };
+
+  // 推奨：履歴として残す（最新を先頭へ）
+  state.dex.unshift(entry);
+
+  // Legacy：固定 +1 + mastery合計/10
+  const base = 1;
+  const mSum = entry.mastery.happy + entry.mastery.fit + entry.mastery.cur;
+  const bonus = Math.floor(mSum / 10);
+  const earned = base + bonus;
+
+  state.legacy += earned;
+  state.graduatedCount += 1;
+  state.pendingGraduation = { earned, base, bonus, entry };
+
+  log(`卒業！ Legacy +${earned}（基本${base} + やり込み${bonus}） → 図鑑へ`);
+
+  // 図鑑画面へ（演出重視）※新しい卵はボタンで開始
+  state.view = "dex";
+  save();
+  updateHUD();
+  renderDexPanel();
+}
+
+function startNewEggWithLegacy(){
+  const cap = 15;
+  const bonus = Math.min(state.legacy, cap);
+
+  state.phase = 1;
+  state.form = "egg";
+  state.lineage = "";
+
+  // 継承は強すぎない“ちょいボーナス”
+  state.happiness = 30 + bonus;
+  state.fitness   = 20;
+  state.curiosity = 10;
+
+  state.mastery = { happy: 0, fit: 0, cur: 0 };
+
+  // 周回開始の演出として回数を戻す（演出重視）
+  state.actionsLeft = 3;
+  state.totalActions = 0;
+  state.lastAction = "";
+  state.animMode = "idle";
+
+  state.pendingGraduation = null;
+}
+
+function onStartNewEgg(){
+  if(!state.pendingGraduation){
+    log("卒業後に新しい卵を開始できます。");
+    return;
+  }
+  startNewEggWithLegacy();
+  state.view = "play";
+  save();
+  updateHUD();
+  toggleDexPanel(false);
+  log("新しい卵を開始しました！");
+}
+
+/** ---------- 9) Sprite generation (no images) ---------- */
+function makeGrid(size=SPRITE){
+  return Array.from({length:size}, ()=>Array(size).fill(0));
+}
+function stamp(grid, x, y){
+  if(x>=0 && x<SPRITE && y>=0 && y<SPRITE) grid[y][x] = 1;
+}
+function ellipse(grid, cx, cy, rx, ry){
+  for(let y=0;y<SPRITE;y++){
+    for(let x=0;x<SPRITE;x++){
+      const dx=(x-cx)/rx, dy=(y-cy)/ry;
+      if(dx*dx + dy*dy <= 1) stamp(grid,x,y);
+    }
+  }
+}
+function rect(grid, x0, y0, w, h){
+  for(let y=y0;y<y0+h;y++) for(let x=x0;x<x0+w;x++) stamp(grid,x,y);
+}
+function outline(grid){
+  const g2 = makeGrid();
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  for(let y=0;y<SPRITE;y++){
+    for(let x=0;x<SPRITE;x++){
+      if(!grid[y][x]) continue;
+      let edge=false;
+      for(const [dx,dy] of dirs){
+        const nx=x+dx, ny=y+dy;
+        if(ny<0||ny>=SPRITE||nx<0||nx>=SPRITE||!grid[ny][nx]) { edge=true; break; }
+      }
+      if(edge) g2[y][x]=1;
+    }
+  }
+  return g2;
+}
+function toSpriteStrings(grid){
+  return grid.map(row=> row.map(v=> v? "#":"." ).join(""));
+}
+
+function addFace(grid, mood="normal", frame=0){
+  // 目（フレームで瞬き）
+  const blink = (frame % 40 === 0); // たまに瞬き
+  const eyeY = blink ? 14 : 13;
+  stamp(grid, 12, eyeY);
+  stamp(grid, 19, eyeY);
+
+  // 口（moodで変化）
+  const mouthY = 19;
+  if(mood==="happy"){
+    stamp(grid, 14, mouthY);
+    stamp(grid, 15, mouthY+1);
+    stamp(grid, 16, mouthY+1);
+    stamp(grid, 17, mouthY);
+  }else if(mood==="eat"){
+    // 口を開ける感じ
+    stamp(grid, 15, mouthY);
+    stamp(grid, 16, mouthY);
+    stamp(grid, 15, mouthY+1);
+    stamp(grid, 16, mouthY+1);
+  }else if(mood==="sleep"){
+    // 目を閉じる（横線）
+    stamp(grid, 11, eyeY); stamp(grid, 12, eyeY); stamp(grid, 13, eyeY);
+    stamp(grid, 18, eyeY); stamp(grid, 19, eyeY); stamp(grid, 20, eyeY);
+    stamp(grid, 15, mouthY);
+    stamp(grid, 16, mouthY);
+  }else{
+    stamp(grid, 15, mouthY);
+    stamp(grid, 16, mouthY);
+  }
+}
+
+// 32×32: “丸い/細い/カクカク” を form から生成し、番号で差分を付ける
+function makePetSprite(form, frame=0, animMode="idle"){
+  const g = makeGrid();
+
+  // 2フレーム揺れ（左右）
+  const wobble = (Math.floor(frame/10) % 2 === 0) ? 0 : 1;
+
+  // アニメ別の差分
+  const walking = (animMode === "walk");
+  const eating  = (animMode === "eat");
+  const playing = (animMode === "play");
+  const sleeping= (animMode === "sleep");
+
+  // 卵
+  if(form==="egg"){
+    ellipse(g, 16+wobble, 17, 10, 12);
+    addFace(g, sleeping ? "sleep" : (eating ? "eat" : "normal"), frame);
+    return toSpriteStrings(outline(g));
+  }
+
+  // 丸い（幸福）
+  if(form.startsWith("happy")){
+    ellipse(g, 16+wobble, 17, 13, 13);
+
+    // 差分（_2:_3）
+    if(form==="happy_2"){
+      // ほっぺ強調（幸福×運動イメージ：元気）
+      stamp(g, 9, 19); stamp(g, 10, 20);
+      stamp(g, 23, 19); stamp(g, 22, 20);
+    }
+    if(form==="happy_3"){
+      // アンテナ（幸福×好奇心）
+      stamp(g, 14+wobble, 4); stamp(g, 18+wobble, 4);
+      stamp(g, 14+wobble, 5); stamp(g, 18+wobble, 5);
+      if(playing && (Math.floor(frame/6)%2===0)) stamp(g, 16+wobble, 3);
+    }
+
+    addFace(g, sleeping ? "sleep" : (eating ? "eat" : "happy"), frame);
+    return toSpriteStrings(outline(g));
+  }
+
+  // 細い（運動）
+  if(form.startsWith("fit")){
+    ellipse(g, 16+wobble, 17, 8, 14);
+
+    // 足（歩くアニメ）
+    const step = (Math.floor(frame/6)%2===0);
+    if(walking){
+      stamp(g, step ? 14+wobble : 15+wobble, 29);
+      stamp(g, step ? 18+wobble : 17+wobble, 29);
+    }else{
+      stamp(g, 15+wobble, 29);
+      stamp(g, 17+wobble, 29);
+    }
+
+    // 差分
+    if(form==="fit_2"){
+      // 表情やさしめ（運動×幸福）
+      stamp(g, 11, 19); stamp(g, 20, 19); // ほっぺ的
+    }
+    if(form==="fit_3"){
+      // 角ばった装飾（運動×好奇心）
+      stamp(g, 12+wobble, 6); stamp(g, 20+wobble, 6);
+      stamp(g, 12+wobble, 7); stamp(g, 20+wobble, 7);
+    }
+
+    addFace(g, sleeping ? "sleep" : (eating ? "eat" : "normal"), frame);
+    return toSpriteStrings(outline(g));
+  }
+
+  // カクカク（好奇心）
+  if(form.startsWith("cur")){
+    rect(g, 8+wobble, 6, 16, 20);
+
+    // アンテナ/角（遊ぶで点滅）
+    stamp(g, 12+wobble, 5);
+    stamp(g, 20+wobble, 5);
+    if(playing && (Math.floor(frame/6)%2===0)) stamp(g, 16+wobble, 4);
+
+    // 差分
+    if(form==="cur_2"){
+      // 少し丸み（好奇心×幸福）：角を丸くする雰囲気
+      ellipse(g, 8+wobble, 6, 2, 2);
+      ellipse(g, 23+wobble, 6, 2, 2);
+      ellipse(g, 8+wobble, 25, 2, 2);
+      ellipse(g, 23+wobble, 25, 2, 2);
+    }
+    if(form==="cur_3"){
+      // 脚強調（好奇心×運動）
+      stamp(g, 12+wobble, 27); stamp(g, 20+wobble, 27);
+      stamp(g, 12+wobble, 28); stamp(g, 20+wobble, 28);
+      if(walking && (Math.floor(frame/6)%2===0)) stamp(g, 16+wobble, 29);
+    }
+
+    addFace(g, sleeping ? "sleep" : (eating ? "eat" : "normal"), frame);
+    return toSpriteStrings(outline(g));
+  }
+
+  // fallback
+  ellipse(g, 16+wobble, 17, 11, 11);
+  addFace(g, "normal", frame);
+  return toSpriteStrings(outline(g));
+}
+
+/** ---------- 10) UI drawing on LCD ---------- */
+function drawUIOnLCD(){
+  // 上部アイコン（食/歩/遊）を点で表示
+  const iconX = 2, iconY = 2;
+  const icons = [
+    {k:"eat",  x:iconX,     y:iconY},
+    {k:"walk", x:iconX + 6, y:iconY},
+    {k:"play", x:iconX + 12,y:iconY},
+  ];
+  icons.forEach(ic=>{
+    const on = (state.lastAction === ic.k);
+    ctx.fillStyle = on ? COLORS.dot : COLORS.faint;
+
+    // ピクト（4x4）
+    ctx.fillRect(ic.x, ic.y, 4, 4);
+    // ちょっとだけ形を変える
+    if(ic.k==="eat"){ ctx.fillRect(ic.x+1, ic.y+1, 2, 2); }
+    if(ic.k==="walk"){ ctx.fillRect(ic.x+1, ic.y+3, 2, 1); }
+    if(ic.k==="play"){ ctx.fillRect(ic.x+2, ic.y+1, 1, 2); }
+  });
+
+  // 右上：アクション残数
+  ctx.fillStyle = COLORS.dot;
+  for(let i=0;i<state.actionsLeft;i++){
+    ctx.fillRect(SCREEN_W-2-(i*2), 2, 1, 4);
+  }
+
+  // 下部：ステバー（簡易）
+  const barW = 26;
+  ctx.fillStyle = COLORS.dot;
+  ctx.fillRect(2, SCREEN_H-6, Math.floor(barW*state.happiness/100), 1);
+  ctx.fillRect(2, SCREEN_H-4, Math.floor(barW*state.fitness/100),   1);
+  ctx.fillRect(2, SCREEN_H-2, Math.floor(barW*state.curiosity/100), 1);
+
+  // 左下：Phaseを点で（Phase1/2/3）
+  for(let i=0;i<state.phase;i++){
+    ctx.fillRect(2+i*2, SCREEN_H-10, 1, 1);
+  }
+}
+
+/** ---------- 11) Render loop ---------- */
+let frame = 0;
+
+function render(){
+  clearLCD();
+
+  if(state.view === "dex"){
+    // 図鑑モードの簡易表示（DEX + 点滅）
+    ctx.fillStyle = COLORS.dot;
+    // "D"
+    ctx.fillRect(12,18,1,18);
+    ctx.fillRect(12,18,10,1);
+    ctx.fillRect(12,35,10,1);
+    ctx.fillRect(22,19,1,16);
+    // "E"
+    ctx.fillRect(30,18,1,18);
+    ctx.fillRect(30,18,10,1);
+    ctx.fillRect(30,26,8,1);
+    ctx.fillRect(30,35,10,1);
+    // "X"
+    for(let i=0;i<18;i++){
+      ctx.fillRect(50+i,18+i,1,1);
+      ctx.fillRect(67-i,18+i,1,1);
+    }
+    // 点滅星
+    if(Math.floor(frame/10)%2===0){
+      ctx.fillRect(78,14,2,2);
+      ctx.fillRect(82,12,1,1);
+    }
+
+    frame++;
+    requestAnimationFrame(render);
+    return;
+  }
+
+  // ペット描画
+  const sprite = makePetSprite(state.form, frame, state.animMode);
+  const ox = Math.floor((SCREEN_W - SPRITE)/2);
+  const oy = Math.floor((SCREEN_H - SPRITE)/2) + 2;
+  drawSprite(sprite, ox, oy);
+
+  drawUIOnLCD();
+
+  // アニメモードは少し時間でidleへ戻す（歩く/食べる/遊ぶ）
+  if(state.animMode !== "idle" && frame % 45 === 0){
+    state.animMode = "idle";
+  }
+
+  frame++;
+  requestAnimationFrame(render);
+}
+
+/** ---------- 12) HUD update ---------- */
+function updateHUD(){
+  document.getElementById("phase").textContent = state.phase;
+  document.getElementById("form").textContent = state.form;
+  document.getElementById("left").textContent = state.actionsLeft;
+
+  document.getElementById("valH").textContent = state.happiness;
+  document.getElementById("valF").textContent = state.fitness;
+  document.getElementById("valC").textContent = state.curiosity;
+
+  document.getElementById("barH").style.width = state.happiness + "%";
+  document.getElementById("barF").style.width = state.fitness + "%";
+  document.getElementById("barC").style.width = state.curiosity + "%";
+
+  const mH = state.mastery.happy, mF = state.mastery.fit, mC = state.mastery.cur;
+  document.getElementById("mH").textContent = mH;
+  document.getElementById("mF").textContent = mF;
+  document.getElementById("mC").textContent = mC;
+
+  const mSum = mH + mF + mC;
+  document.getElementById("mSum").textContent = mSum;
+
+  document.getElementById("legacy").textContent = state.legacy;
+  document.getElementById("dexCount").textContent = state.dex.length;
+
+  const inDex = (state.view === "dex");
+  toggleDexPanel(inDex);
+  if(inDex) renderDexPanel();
+
+  // ボタン制御
+  ["btnEat","btnWalk","btnPlay","btnSleep"].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.disabled = inDex || (state.actionsLeft<=0);
+  });
+
+  const gradBtn = document.getElementById("btnGraduate");
+  if(gradBtn) gradBtn.disabled = inDex || (state.phase < 3);
+
+  const dexBtn = document.getElementById("btnDex");
+  if(dexBtn) dexBtn.disabled = inDex;
+
+  const startBtn = document.getElementById("btnStartNewEgg");
+  if(startBtn) startBtn.disabled = !state.pendingGraduation;
+}
+
+/** ---------- 13) Wire events ---------- */
+document.getElementById("btnEat").onclick  = ()=>spendAction("eat");
+document.getElementById("btnWalk").onclick = ()=>spendAction("walk");
+document.getElementById("btnPlay").onclick = ()=>spendAction("play");
+document.getElementById("btnSleep").onclick= ()=>spendAction("sleep");
+
+document.getElementById("btnDex").onclick = ()=>{
+  state.view = "dex";
+  save();
+  updateHUD();
+};
+
+document.getElementById("btnBackToPlay").onclick = ()=>{
+  state.view = "play";
+  save();
+  updateHUD();
+};
+
+document.getElementById("btnGraduate").onclick = graduateNow;
+document.getElementById("btnStartNewEgg").onclick = onStartNewEgg;
+
+document.getElementById("btnReset").onclick = ()=>{
+  localStorage.removeItem(STORAGE_KEY);
+  state = structuredClone(defaultState);
+  save();
+  updateHUD();
+  log("リセットしました。");
+};
+
+/** ---------- 14) Boot ---------- */
+dailyResetIfNeeded();
+updateHUD();
+log("起動しました。1日3アクションで育てよう！");
+render();
+</script>
+</body>
+</html>
